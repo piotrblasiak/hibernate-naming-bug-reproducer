@@ -1,0 +1,15 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: create
+      naming:
+        # Custom strategy that applies snake_case even to quoted identifiers
+        physical-strategy: com.example.QuotedIdentifierNamingStrategy
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
