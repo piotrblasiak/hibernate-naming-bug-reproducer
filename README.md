@@ -42,33 +42,24 @@ When you use backticks in `@Table(name = "`user`")`:
 ## Reproducing the Bug
 
 1. Clone this repository
-2. Edit `src/main/resources/application.yml` to use the default naming strategy:
-
-```yaml
-spring:
-  jpa:
-    hibernate:
-      naming:
-        physical-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
-```
-
-3. Run tests - they will **FAIL**:
+2. Run tests - they will **FAIL**:
 
 ```bash
 mvn test
 ```
 
-4. Check the console output - you'll see quoted camelCase column names like `"createdBy_id"`
+3. Check the console output - you'll see quoted camelCase column names like `"createdBy_id"`
 
 ## Workaround
 
-Use the custom `QuotedIdentifierNamingStrategy` included in this project:
+Edit `src/main/resources/application.yml` to use the custom `QuotedIdentifierNamingStrategy`:
 
 ```yaml
 spring:
   jpa:
     hibernate:
       naming:
+        #physical-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
         physical-strategy: com.example.QuotedIdentifierNamingStrategy
 ```
 
@@ -77,13 +68,10 @@ This strategy:
 2. Removes unnecessary quoting from column names
 3. Only preserves quoting for table names that are SQL reserved words
 
-## Running Tests with the Workaround
+Run tests again - they will **PASS**:
 
 ```bash
-# With the workaround enabled (default in this project)
 mvn test
-
-# All tests should PASS
 ```
 
 ## Project Structure
