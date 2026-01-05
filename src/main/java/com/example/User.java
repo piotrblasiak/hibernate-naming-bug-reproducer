@@ -4,14 +4,24 @@ import jakarta.persistence.*;
 import java.util.Set;
 
 /**
- * Entity with a quoted table name to handle SQL reserved word "user".
+ * Entity using a SQL reserved word "user" as the table name.
  *
- * THE BUG: Using backticks to quote the table name causes Hibernate 7 to
- * propagate the quoting to ALL implicit identifiers that reference this entity,
- * bypassing the PhysicalNamingStrategy (CamelCaseToUnderscoresNamingStrategy).
+ * This demonstrates TWO related bugs where PhysicalNamingStrategy is bypassed:
+ *
+ * BUG 1: When using hibernate.auto_quote_keyword=true (no @Table annotation needed)
+ *        - Table becomes "User" instead of "user" (no snake_case applied)
+ *        - Join columns become "createdBy_id" instead of "created_by_id"
+ *
+ * BUG 2: When manually quoting with @Table(name = "`user`")
+ *        - Table is correctly "user" (we specified it)
+ *        - But join columns still become "createdBy_id" instead of "created_by_id"
+ *
+ * See application.yml to switch between test scenarios.
  */
 @Entity
-@Table(name = "`user`") // Quoted because "user" is a SQL reserved word
+// For BUG 1 test: Comment out @Table, enable auto_quote_keyword=true in application.yml
+// For BUG 2 test: Uncomment @Table, disable auto_quote_keyword in application.yml
+@Table(name = "`user`")
 public class User {
 
     @Id
@@ -22,10 +32,6 @@ public class User {
 
     private String lastName;
 
-    /**
-     * ElementCollection table should be: user_user_roles (snake_case)
-     * Buggy behavior generates: "User_userRoles" (quoted, camelCase)
-     */
     @ElementCollection
     @Enumerated(EnumType.STRING)
     private Set<Role> userRoles;

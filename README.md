@@ -2,12 +2,29 @@
 
 ## Problem
 
-When an entity uses a **quoted `@Table` name** (e.g., `` @Table(name = "`user`") `` to handle SQL reserved words), Hibernate 7 propagates the quoting to **all implicit identifiers** that reference this entity, **bypassing the `PhysicalNamingStrategy`**.
+Quoted identifiers bypass `PhysicalNamingStrategy` (e.g., `CamelCaseToUnderscoresNamingStrategy`), causing incorrect column and table names.
 
-This affects:
-- Implicit `@ManyToOne` join column names
-- `@ElementCollection` table names
-- Any other implicit identifier derived from the quoted entity
+This manifests in **two related scenarios**:
+
+### Bug 1: `hibernate.auto_quote_keyword=true`
+
+When using auto-quoting for SQL reserved words, the `PhysicalNamingStrategy` is completely bypassed:
+
+| Identifier | Expected | Actual |
+|------------|----------|--------|
+| Table `User` | `"user"` | `"User"` |
+| Join column `createdBy` | `created_by_id` | `"createdBy_id"` |
+| Collection table | `user_user_roles` | `"User_userRoles"` |
+
+### Bug 2: Manual quoting with `@Table(name = "`user`")`
+
+When manually quoting a table name, the quoting propagates to all derived identifiers:
+
+| Identifier | Expected | Actual |
+|------------|----------|--------|
+| Table | `"user"` ✓ | `"user"` ✓ |
+| Join column `createdBy` | `created_by_id` | `"createdBy_id"` |
+| Collection table | `user_user_roles` | `"user_user_roles"` ✓ |
 
 ## Environment
 
@@ -15,71 +32,62 @@ This affects:
 - **Spring Boot:** 4.0.1
 - **Java:** 21
 
-## Expected vs Actual Behavior
+## Reproducing Bug 1 (auto_quote_keyword)
 
-### Join Columns
-
-| Field | Expected Column Name | Actual (Buggy) Name |
-|-------|---------------------|---------------------|
-| `createdBy` | `created_by_id` | `"createdBy_id"` |
-| `lastModifiedBy` | `last_modified_by_id` | `"lastModifiedBy_id"` |
-| `lastModifier` | `last_modifier_id` | `"lastModifier_id"` |
-
-### Element Collection Tables
-
-| Field | Expected Table Name | Actual (Buggy) Name |
-|-------|---------------------|---------------------|
-| `userRoles` | `user_user_roles` | `"User_userRoles"` |
-
-## Root Cause
-
-When you use backticks in `@Table(name = "`user`")`:
-1. Hibernate marks the table identifier as "quoted"
-2. This quoted status propagates to implicit identifiers (join columns, collection tables)
-3. Quoted identifiers bypass `CamelCaseToUnderscoresNamingStrategy`
-4. The identifiers remain in camelCase and are quoted in SQL
-
-## Reproducing the Bug
-
-1. Clone this repository
-2. Run tests - they will **FAIL**:
+1. Edit `src/main/java/com/example/User.java` - comment out `@Table(name = "`user`")`
+2. Edit `src/main/resources/application.yml` - add `hibernate.auto_quote_keyword: true`
+3. Run tests:
 
 ```bash
 mvn test
 ```
 
-3. Check the console output - you'll see quoted camelCase column names like `"createdBy_id"`
+Tests will **FAIL**. Check console output for wrong column names like `"createdBy_id"`.
+
+## Reproducing Bug 2 (manual backticks)
+
+This is the default configuration:
+
+1. Ensure `@Table(name = "`user`")` is present in `User.java`
+2. Ensure `auto_quote_keyword` is NOT set in `application.yml`
+3. Run tests:
+
+```bash
+mvn test
+```
+
+Tests will **FAIL**. Check console output for wrong column names like `"createdBy_id"`.
+
+## Root Cause
+
+When an identifier is marked as "quoted" (either via `auto_quote_keyword` or manual backticks):
+1. Hibernate preserves the quoted flag on derived identifiers (join columns, collection tables)
+2. The `PhysicalNamingStrategy` does not process quoted identifiers
+3. CamelCase names remain unchanged instead of being converted to snake_case
 
 ## Workaround
 
-Edit `src/main/resources/application.yml` to use the custom `QuotedIdentifierNamingStrategy`:
+Use the custom `QuotedIdentifierNamingStrategy` included in this project:
 
 ```yaml
 spring:
   jpa:
     hibernate:
       naming:
-        #physical-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
         physical-strategy: com.example.QuotedIdentifierNamingStrategy
 ```
 
 This strategy:
-1. Applies snake_case conversion regardless of quoting status
+1. Forces snake_case conversion regardless of quoting status
 2. Removes unnecessary quoting from column names
 3. Only preserves quoting for table names that are SQL reserved words
-
-Run tests again - they will **PASS**:
-
-```bash
-mvn test
-```
 
 ## Project Structure
 
 ```
 src/main/java/com/example/
 ├── Application.java                     # Spring Boot application
-├── User.java                            # Entity with quoted @Table (the trigger)
+├── User.java                            # Entity with reserved word table name
 ├── Post.java                            # Entity with @ManyToOne to User
 ├── BaseEntity.java                      # @MappedSuperclass with @ManyToOne to User
 └── QuotedIdentifierNamingStrategy.java  # Workaround implementation
@@ -93,10 +101,6 @@ src/test/java/com/example/
 This bug causes issues with **PostgreSQL** and other databases that treat quoted identifiers as case-sensitive. Queries fail with errors like:
 
 ```
-ERROR: column "lastModifier_id" does not exist
-Hint: Perhaps you meant to reference the column "last_modifier_id"
+ERROR: column "createdBy_id" does not exist
+Hint: Perhaps you meant to reference the column "created_by_id"
 ```
-
-## Analysis
-
-The `PhysicalNamingStrategy` is bypassed for identifiers that are marked as "quoted". When an entity has a quoted table name, this quoting propagates to derived identifiers (join columns, collection tables), and the physical naming strategy never gets a chance to convert them to snake_case.
